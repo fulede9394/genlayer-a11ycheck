@@ -24,16 +24,14 @@ class A11yCheck(gl.Contract):
 
     Consensus follows the judgment pattern, not the extraction
     pattern. The LLM does not extract a field for code to
-    compare; it judges, and returns one line:
-
-      VERDICT|REASON
-
-    VERDICT is PASS, FAIL or INCONCLUSIVE, and REASON is one
-    short sentence. The line is judged under
-    prompt_non_comparative: two judgments are equivalent when
-    they reach the same verdict word, whatever the reason says.
-    Deterministic code then only parses the verdict word and
-    stores the reason for the audit trail - it never second-
+    compare; it judges. Two calls, both proven in earlier
+    contracts: the verdict word is judged under strict_eq (the
+    function normalises its own output to one canonical word,
+    so exact agreement is meaningful), and the one-sentence
+    reason is judged under prompt_comparative with the principle
+    that two reasons are equivalent when they explain the same
+    verdict for the same reason. Deterministic code then only
+    stores what the validators agreed on - it never second-
     guesses the judgment.
 
     That is the whole point, and what makes this contract a
@@ -92,7 +90,7 @@ class A11yCheck(gl.Contract):
         page_url = self.page_urls[aid]
         criteria = self.criteria_texts[aid]
 
-        def judge_audit() -> str:
+        def judge_verdict() -> str:
             page = gl.nondet.web.render(page_url, mode="text")
             prompt = f"""Judge whether a live web page meets the stated accessibility criteria, using only the page below.
 
@@ -101,32 +99,39 @@ Accessibility criteria: {criteria}
 Page content:
 {page[:4000]}
 
-Reply with exactly one line, nothing else, in this format:
-VERDICT|REASON
-
-VERDICT is one of:
+Reply with exactly one word, nothing else:
 PASS - the page meets all of the stated accessibility criteria
 FAIL - the page violates at least one of the stated criteria
 INCONCLUSIVE - the page could not be read, or it carries too little evidence to judge either way
 
-REASON is one short sentence explaining the verdict. Judge what the page actually shows: a criterion about images can only pass if the page shows images that meet it, and a missing feature the criteria require is a failure, not a pass."""
+Judge what the page actually shows: a criterion about images can only pass if the page shows images that meet it, and a missing feature the criteria require is a failure, not a pass."""
+            raw = gl.nondet.exec_prompt(prompt).strip().upper()
+            if "PASS" in raw:
+                return "PASS"
+            if "FAIL" in raw:
+                return "FAIL"
+            return "INCONCLUSIVE"
+
+        verdict_word = gl.eq_principle.strict_eq(judge_verdict)
+
+        def judge_reason() -> str:
+            page = gl.nondet.web.render(page_url, mode="text")
+            prompt = f"""Explain in one short sentence why the page received the verdict below, using only the page content.
+
+Accessibility criteria: {criteria}
+Verdict: {verdict_word}
+
+Page content:
+{page[:4000]}
+
+Reply with one short sentence, nothing else."""
             return gl.nondet.exec_prompt(prompt).strip()
 
-        line = gl.eq_principle.prompt_non_comparative(
-            judge_audit,
-            principle="Two judgments are equivalent when they give the same verdict word: PASS, FAIL, or INCONCLUSIVE. The reason text does not matter.",
+        reason = gl.eq_principle.prompt_comparative(
+            judge_reason,
+            principle="Two reasons are equivalent when they explain the same verdict for the same reason. Different wording does not make them different.",
         )
 
-        # Deterministic parsing only: the verdict word is taken
-        # from the agreed line, the reason is stored for audit.
-        first_sep = line.find("|")
-        if first_sep == -1:
-            verdict_word = line.strip().upper()
-            reason = ""
-        else:
-            verdict_word = line[:first_sep].strip().upper()
-            rest = line[first_sep + 1:]
-            reason = rest.strip()
         self.reasons[aid] = reason
 
         if verdict_word == "PASS":

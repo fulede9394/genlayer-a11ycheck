@@ -33,10 +33,14 @@ trail.
 
 ## Judgment, not extraction
 
-The LLM returns one line, `VERDICT|REASON`, judged under
-prompt_non_comparative: two judgments are equivalent when
-they reach the same verdict word, whatever the reason says.
-Deterministic code then only parses the verdict word — it
+The LLM judges; it does not extract a field for code to
+compare. Two calls, both proven in earlier contracts: the
+verdict word is judged under strict_eq (the function
+normalises its own output to one canonical word), and the
+one-sentence reason is judged under prompt_comparative with
+the principle that two reasons are equivalent when they
+explain the same verdict for the same reason. Deterministic
+code then only stores what the validators agreed on — it
 never second-guesses the judgment. A page that violates even
 one stated criterion is `FAIL`, not a mismatch; a page that
 cannot be read is `INCONCLUSIVE`, not unknown.
